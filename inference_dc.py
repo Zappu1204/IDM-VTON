@@ -33,7 +33,7 @@ from packaging import version
 from torchvision import transforms
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, StableDiffusionXLControlNetInpaintPipeline
-from transformers import AutoTokenizer, PretrainedConfig,CLIPImageProcessor, CLIPVisionModelWithProjection,CLIPTextModelWithProjection, CLIPTextModel, CLIPTokenizer
+from transformers import AutoTokenizer, PretrainedConfig,CLIPImageProcessor, CLIPVisionModelWithProjection,CLIPTextModelWithProjection, CLIPTextModel, CLIPTokenizer, BitsAndBytesConfig
 import cv2
 from diffusers.utils.import_utils import is_xformers_available
 from numpy.linalg import lstsq
@@ -76,11 +76,11 @@ def parse_args():
     parser.add_argument("--output_dir",type=str,default="result",)
     parser.add_argument("--category",type=str,default="upper_body",choices=["upper_body", "lower_body", "dresses"])
     parser.add_argument("--unpaired",action="store_true",)
-    parser.add_argument("--data_dir",type=str,default="/home/omnious/workspace/yisol/Dataset/zalando")
+    parser.add_argument("--data_dir",type=str,default="/afh/projects/project-open-ai-instance-sweden-69256885-4e00-4535-ac1a-e03d02348588/shared/Users/HaiBX.B22AT105/DressCode")
     parser.add_argument("--seed", type=int, default=42,)
     parser.add_argument("--test_batch_size", type=int, default=2,)
     parser.add_argument("--guidance_scale",type=float,default=2.0,)
-    parser.add_argument("--mixed_precision",type=str,default=None,choices=["no", "fp16", "bf16"],)
+    parser.add_argument("--mixed_precision",type=str,default="fp16",choices=["no", "fp16", "bf16", "int8"],)
     parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
     args = parser.parse_args()
 
@@ -356,6 +356,7 @@ def main():
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
         project_config=accelerator_project_config,
+        device_placement="auto",
     )
     if accelerator.is_local_main_process:
         transformers.utils.logging.set_verbosity_warning()
@@ -373,56 +374,84 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
 
     weight_dtype = torch.float16
-    # if accelerator.mixed_precision == "fp16":
-    #     weight_dtype = torch.float16
-    #     args.mixed_precision = accelerator.mixed_precision
-    # elif accelerator.mixed_precision == "bf16":
-    #     weight_dtype = torch.bfloat16
-    #     args.mixed_precision = accelerator.mixed_precision
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+        args.mixed_precision = accelerator.mixed_precision
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+        args.mixed_precision = accelerator.mixed_precision
 
+    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+    cache = r"/afh/projects/project-open-ai-instance-sweden-69256885-4e00-4535-ac1a-e03d02348588/shared/Users/HaiBX.B22AT105/.cache/huggingface"
     # Load scheduler, tokenizer and models.
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler = DDPMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path, 
+        subfolder="scheduler",
+        cache_dir=cache,
+        )
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
         torch_dtype=torch.float16,
+        # torch_dtype=torch.int8,
+        cache_dir=cache,
+        # device_map="auto",
     )
     unet = UNet2DConditionModel.from_pretrained(
         "yisol/IDM-VTON-DC",
         subfolder="unet",
         torch_dtype=torch.float16,
+        
+        cache_dir=cache,
+        # device_map="auto",
     )
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="image_encoder",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
+        # load_in_4bit = True,
     )
     UNet_Encoder = UNet2DConditionModel_ref.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="unet_encoder",
         torch_dtype=torch.float16,
+        # torch_dtype=torch.int8,
+        cache_dir=cache,
+        # device_map="auto",
     )
     text_encoder_one = CLIPTextModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         torch_dtype=torch.float16,
+        # torch_dtype=torch.int8,
+        cache_dir=cache,
+        # device_map="auto",
+        # load_in_4bit = True,
     )
     text_encoder_two = CLIPTextModelWithProjection.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="text_encoder_2",
         torch_dtype=torch.float16,
+        # torch_dtype=torch.int8,
+        cache_dir=cache,
+        # device_map="auto",
+        # load_in_4bit = True,
     )
     tokenizer_one = AutoTokenizer.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="tokenizer",
         revision=None,
         use_fast=False,
+        cache_dir=cache,
     )
     tokenizer_two = AutoTokenizer.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="tokenizer_2",
         revision=None,
         use_fast=False,
+        cache_dir=cache,
     )
 
 
@@ -451,6 +480,10 @@ def main():
             unet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
+        print("#######################")
+        print("# xformers is enabled #")
+        print("#######################")
+
 
     test_dataset = DresscodeTestDataset(
         dataroot_path=args.data_dir,
@@ -481,7 +514,7 @@ def main():
     ).to(accelerator.device)
     pipe.unet_encoder = UNet_Encoder
 
-    # pipe.enable_sequential_cpu_offload()
+    pipe.enable_sequential_cpu_offload()
     # pipe.enable_model_cpu_offload()
     # pipe.enable_vae_slicing()
 
@@ -546,7 +579,8 @@ def main():
                         
 
 
-                        generator = torch.Generator(pipe.device).manual_seed(args.seed) if args.seed is not None else None
+                        # generator = torch.Generator(pipe.device).manual_seed(args.seed) if args.seed is not None else None
+                        generator = torch.Generator(device='cuda').manual_seed(args.seed) if args.seed is not None else None
                         images = pipe(
                             prompt_embeds=prompt_embeds,
                             negative_prompt_embeds=negative_prompt_embeds,

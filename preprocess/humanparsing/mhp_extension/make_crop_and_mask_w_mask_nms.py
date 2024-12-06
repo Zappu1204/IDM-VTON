@@ -3,6 +3,7 @@ import cv2, torch
 import os
 import json
 import argparse
+import time
 import pycocotools.mask as mask_util
 from tqdm import tqdm
 
@@ -112,6 +113,8 @@ def get_arguments():
 
 
 def main(args):
+    start_time = time.time()  # Ghi lại thời gian bắt đầu
+
     img_info_list = json.load(open(args.img_list, encoding='UTF-8'))
     pred = torch.load(args.det_res)
 
@@ -127,6 +130,9 @@ def main(args):
         json_file, file_list = make_crop_and_mask(img_info, pred, file_list, crop_save_dir, mask_save_dir, args)
         with open(os.path.join(args.save_dir, 'crop.json'), 'w') as f:
             json.dump(json_file, f, indent=2)
+
+    end_time = time.time()  # Ghi lại thời gian kết thúc
+    print(f"Thời gian chạy tổng cộng: {end_time - start_time} giây")  # In ra thời gian chạy
 
 
 if __name__ == '__main__':

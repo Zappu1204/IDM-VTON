@@ -33,7 +33,7 @@ from packaging import version
 from torchvision import transforms
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, StableDiffusionXLControlNetInpaintPipeline
-from transformers import AutoTokenizer, PretrainedConfig,CLIPImageProcessor, CLIPVisionModelWithProjection,CLIPTextModelWithProjection, CLIPTextModel, CLIPTokenizer
+from transformers import AutoTokenizer, PretrainedConfig,CLIPImageProcessor, CLIPVisionModelWithProjection,CLIPTextModelWithProjection, CLIPTextModel, CLIPTokenizer, BitsAndBytesConfig
 
 from diffusers.utils.import_utils import is_xformers_available
 
@@ -44,7 +44,9 @@ from src.tryon_pipeline import StableDiffusionXLInpaintPipeline as TryonPipeline
 
 
 logger = get_logger(__name__, log_level="INFO")
-
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 
 def parse_args():
@@ -55,15 +57,13 @@ def parse_args():
     parser.add_argument("--num_inference_steps",type=int,default=30,)
     parser.add_argument("--output_dir",type=str,default="result",)
     parser.add_argument("--unpaired",action="store_true",)
-    parser.add_argument("--data_dir",type=str,default="/home/omnious/workspace/yisol/Dataset/zalando")
+    parser.add_argument("--data_dir",type=str,default="/afh/projects/project-open-ai-instance-sweden-69256885-4e00-4535-ac1a-e03d02348588/shared/Users/HaiBX.B22AT105/zalando")
     parser.add_argument("--seed", type=int, default=42,)
     parser.add_argument("--test_batch_size", type=int, default=2,)
     parser.add_argument("--guidance_scale",type=float,default=2.0,)
-    parser.add_argument("--mixed_precision",type=str,default=None,choices=["no", "fp16", "bf16"],)
+    parser.add_argument("--mixed_precision",type=str,default="fp16",choices=["no", "fp16", "bf16"],)
     parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
     args = parser.parse_args()
-
-
     return args
 
 def pil_to_tensor(images):
@@ -81,6 +81,10 @@ class VitonHDTestDataset(data.Dataset):
         size: Tuple[int, int] = (512, 384),
     ):
         super(VitonHDTestDataset, self).__init__()
+        # if os.name == "nt":
+        #     dataroot_path = os.path.dirname(os.getcwd())
+        # elif os.name == "posix":
+        #     dataroot_path = os.getcwd()
         self.dataroot = dataroot_path
         self.phase = phase
         self.height = size[0]
@@ -126,7 +130,6 @@ class VitonHDTestDataset(data.Dataset):
         c_names = []
         dataroot_names = []
 
-
         if phase == "train":
             filename = os.path.join(dataroot_path, f"{phase}_pairs.txt")
         else:
@@ -152,6 +155,7 @@ class VitonHDTestDataset(data.Dataset):
         self.c_names = c_names
         self.dataroot_names = dataroot_names
         self.clip_processor = CLIPImageProcessor()
+        
     def __getitem__(self, index):
         c_name = self.c_names[index]
         im_name = self.im_names[index]
@@ -194,17 +198,19 @@ class VitonHDTestDataset(data.Dataset):
     def __len__(self):
         # model images + cloth image
         return len(self.im_names)
-
-
-
-
+    
+#################
+# Main function #
+#################
 def main():
     args = parse_args()
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
         project_config=accelerator_project_config,
+        device_placement="auto",
     )
+    print("Device: ",accelerator.device)
     if accelerator.is_local_main_process:
         transformers.utils.logging.set_verbosity_warning()
         diffusers.utils.logging.set_verbosity_info()
@@ -221,56 +227,84 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
 
     weight_dtype = torch.float16
-    # if accelerator.mixed_precision == "fp16":
-    #     weight_dtype = torch.float16
-    #     args.mixed_precision = accelerator.mixed_precision
-    # elif accelerator.mixed_precision == "bf16":
-    #     weight_dtype = torch.bfloat16
-    #     args.mixed_precision = accelerator.mixed_precision
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+        args.mixed_precision = accelerator.mixed_precision
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+        args.mixed_precision = accelerator.mixed_precision
 
+
+    # quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+    cache = r"/afh/projects/project-open-ai-instance-sweden-69256885-4e00-4535-ac1a-e03d02348588/shared/Users/HaiBX.B22AT105/IDM-VTON/.cache/huggingface"
     # Load scheduler, tokenizer and models.
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler = DDPMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path, 
+        subfolder="scheduler", 
+        cache_dir=cache,
+    )
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
+
     )
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="unet",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
     )
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="image_encoder",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
+        # quantization_config=quantization_config,
+        # load_in_4bit=True,
     )
     unet_encoder = UNet2DConditionModel_ref.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="unet_encoder",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
     )
     text_encoder_one = CLIPTextModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
+        # quantization_config=quantization_config,
+        # load_in_4bit=True,
     )
     text_encoder_two = CLIPTextModelWithProjection.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="text_encoder_2",
         torch_dtype=torch.float16,
+        cache_dir=cache,
+        # device_map="auto",
+        # quantization_config=quantization_config,
+        # load_in_4bit=True,
     )
     tokenizer_one = AutoTokenizer.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="tokenizer",
         revision=None,
         use_fast=False,
+        cache_dir=cache,
     )
     tokenizer_two = AutoTokenizer.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="tokenizer_2",
         revision=None,
         use_fast=False,
+        cache_dir=cache,
     )
 
 
@@ -299,6 +333,9 @@ def main():
             unet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
+        print("#######################")
+        print("# xformers is enabled #")
+        print("#######################")
 
     test_dataset = VitonHDTestDataset(
         dataroot_path=args.data_dir,
@@ -328,7 +365,7 @@ def main():
             torch_dtype=torch.float16,
     ).to(accelerator.device)
 
-    # pipe.enable_sequential_cpu_offload()
+    pipe.enable_sequential_cpu_offload()
     # pipe.enable_model_cpu_offload()
     # pipe.enable_vae_slicing()
 
@@ -393,7 +430,8 @@ def main():
                         
 
 
-                        generator = torch.Generator(pipe.device).manual_seed(args.seed) if args.seed is not None else None
+                        # generator = torch.Generator(pipe.device).manual_seed(args.seed) if args.seed is not None else None
+                        generator = torch.Generator(device="cpu").manual_seed(args.seed) if args.seed is not None else None
                         images = pipe(
                             prompt_embeds=prompt_embeds,
                             negative_prompt_embeds=negative_prompt_embeds,
@@ -416,10 +454,7 @@ def main():
 
                     for i in range(len(images)):
                         x_sample = pil_to_tensor(images[i])
-                        torchvision.utils.save_image(x_sample,os.path.join(args.output_dir,sample['im_name'][i]))
-                
-
-
+                        torchvision.utils.save_image(x_sample,os.path.join(args.output_dir,sample['im_name'][i]))      
 
 if __name__ == "__main__":
     main()

@@ -14,7 +14,7 @@ from datasets.simple_extractor_dataset import SimpleFolderDataset
 from utils.transforms import transform_logits
 from tqdm import tqdm
 from PIL import Image
-
+import time
 
 def get_palette(num_cls):
     """ Returns the color map for visualizing the segmentation mask.
@@ -118,7 +118,8 @@ def refine_hole(parsing_result_filled, parsing_result, arm_mask):
             cv2.drawContours(refine_hole_mask, contours, i, color=255, thickness=-1)
     return refine_hole_mask + arm_mask
 
-def onnx_inference(session, lip_session, input_dir):
+def onnx_inference(session, lip_session, input_dir,output_dir,face_mask_dir):
+    start_time = time.time()
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.406, 0.456, 0.485], std=[0.225, 0.224, 0.229])
@@ -181,7 +182,15 @@ def onnx_inference(session, lip_session, input_dir):
     output_img = Image.fromarray(np.asarray(parsing_result, dtype=np.uint8))
     output_img.putpalette(palette)
     face_mask = torch.from_numpy((parsing_result == 11).astype(np.float32))
+    
+    output_img.save(output_dir)
+    
+    face_mask_image = Image.fromarray((face_mask.numpy() * 255).astype(np.uint8))
+    face_mask_image.save(face_mask_dir)
 
+    end_time = time.time()  # Kết thúc đo thời gian
+    total_time = end_time - start_time
+    print(f"Thời gian gen ra output_img và face_mask : {total_time:.2f} giây")
     return output_img, face_mask
 
 

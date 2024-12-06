@@ -1,0 +1,34 @@
+python run_openpose.py \
+--input_dir Messi_highresoa.jpg \
+--output_dir output/skeleton/Messi_highresoa.jpg \
+--keypoints_dir output/keypoint/Messi_highresoa.json
+
+python run_openpose.py \
+--input_dir messi/model/m01.jpg \
+--output_dir messi/temp/skeleton/m01.jpg \
+--keypoints_dir messi/temp/keypoint/m01.json
+
+python run_openpose.py \
+--input_dir Girl_test.jpg \
+--output_dir output/skeleton/Girl_test.jpg \
+--keypoints_dir output/keypoint/Girl_test.json
+
+python run_parsing.py \
+--input_dir Messi_highreso.jpg \
+--output_dir output/output_image/Messi_highreso.jpg \
+--face_mask_dir output/face_mask/Messi_highreso.json
+
+python run_parsing.py \
+--input_dir Messi_highreso.jpg \
+--output_dir output/output_image/Messi_highreso.png \
+--face_mask_dir output/face_mask/Messi_highreso.png
+
+python run_parsing.py \
+--input_dir Girl_test.jpg \
+--output_dir output/output_image/Girl_test.png \
+--face_mask_dir output/face_mask/Girl_test.png
+
+python run_parsing.py \
+--input_dir Taylor.jpg \
+--output_dir output/output_image/Taylor.png \
+--face_mask_dir output/face_mask/Taylor.png

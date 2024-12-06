@@ -57,6 +57,7 @@ def nms(x, t, s):
 
     z = np.zeros_like(y, dtype=np.uint8)
     z[y > t] = 255
+    #print("Test test")
     return z
 
 
@@ -86,6 +87,7 @@ def safe_step(x, step=2):
 def img2mask(img, H, W, low=10, high=90):
     assert img.ndim == 3 or img.ndim == 2
     assert img.dtype == np.uint8
+    #print("Test11")
 
     if img.ndim == 3:
         y = img[:, :, random.randrange(0, img.shape[2])]

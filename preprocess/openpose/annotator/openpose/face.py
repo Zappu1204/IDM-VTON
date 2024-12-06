@@ -4,7 +4,7 @@ from torchvision.transforms import ToTensor, ToPILImage
 import torch
 import torch.nn.functional as F
 import cv2
-
+import time
 from . import util
 from torch.nn import Conv2d, Module, ReLU, MaxPool2d, init
 
@@ -336,6 +336,7 @@ class Face(object):
 
         if torch.cuda.is_available():
             x_data = x_data.cuda()
+            #print("Test")
 
         with torch.no_grad():
             hs = self.model(x_data[None, ...])

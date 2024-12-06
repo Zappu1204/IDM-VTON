@@ -44,11 +44,12 @@ def pil_to_binary_mask(pil_image, threshold=0):
 
 base_path = 'yisol/IDM-VTON'
 example_path = os.path.join(os.path.dirname(__file__), 'example')
-
+cache = r"/afh/projects/project-open-ai-instance-sweden-69256885-4e00-4535-ac1a-e03d02348588/shared/Users/HaiBX.B22AT105/.cache/huggingface"
 unet = UNet2DConditionModel.from_pretrained(
     base_path,
     subfolder="unet",
     torch_dtype=torch.float16,
+    cache_dir=cache
 )
 unet.requires_grad_(False)
 tokenizer_one = AutoTokenizer.from_pretrained(
@@ -56,12 +57,14 @@ tokenizer_one = AutoTokenizer.from_pretrained(
     subfolder="tokenizer",
     revision=None,
     use_fast=False,
+    cache_dir=cache
 )
 tokenizer_two = AutoTokenizer.from_pretrained(
     base_path,
     subfolder="tokenizer_2",
     revision=None,
     use_fast=False,
+    cache_dir=cache
 )
 noise_scheduler = DDPMScheduler.from_pretrained(base_path, subfolder="scheduler")
 
@@ -69,27 +72,30 @@ text_encoder_one = CLIPTextModel.from_pretrained(
     base_path,
     subfolder="text_encoder",
     torch_dtype=torch.float16,
+    cache_dir=cache
 )
 text_encoder_two = CLIPTextModelWithProjection.from_pretrained(
     base_path,
     subfolder="text_encoder_2",
     torch_dtype=torch.float16,
+    cache_dir=cache
 )
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(
     base_path,
     subfolder="image_encoder",
     torch_dtype=torch.float16,
+    cache_dir=cache
     )
 vae = AutoencoderKL.from_pretrained(base_path,
                                     subfolder="vae",
-                                    torch_dtype=torch.float16,
+                                    torch_dtype=torch.float16,cache_dir=cache
 )
 
 # "stabilityai/stable-diffusion-xl-base-1.0",
 UNet_Encoder = UNet2DConditionModel_ref.from_pretrained(
     base_path,
     subfolder="unet_encoder",
-    torch_dtype=torch.float16,
+    torch_dtype=torch.float16,cache_dir=cache
 )
 
 parsing_model = Parsing(0)
@@ -124,15 +130,24 @@ pipe = TryonPipeline.from_pretrained(
 pipe.unet_encoder = UNet_Encoder
 
 def start_tryon(dict,garm_img,garment_des,is_checked,is_checked_crop,denoise_steps,seed):
-    
+    print("Test start_tryon")
     openpose_model.preprocessor.body_estimation.model.to(device)
     pipe.to(device)
     pipe.unet_encoder.to(device)
+    
+    # test here
+    # print(unet)
+    # print(vae)
+    # print(text_encoder_one)
+    # print(text_encoder_two)
+    # print(image_encoder)
+    
+    
 
     garm_img= garm_img.convert("RGB").resize((768,1024))
     human_img_orig = dict["background"].convert("RGB")    
     
-    if is_checked_crop:
+    if is_checked_crop: # kiểm tra xem có cần cắt ảnh người hay không
         width, height = human_img_orig.size
         target_width = int(min(width, height * (3 / 4)))
         target_height = int(min(height, width * (4 / 3)))
@@ -147,11 +162,11 @@ def start_tryon(dict,garm_img,garment_des,is_checked,is_checked_crop,denoise_ste
         human_img = human_img_orig.resize((768,1024))
 
 
-    if is_checked:
-        keypoints = openpose_model(human_img.resize((384,512)))
-        model_parse, _ = parsing_model(human_img.resize((384,512)))
-        mask, mask_gray = get_mask_location('hd', "upper_body", model_parse, keypoints)
-        mask = mask.resize((768,1024))
+    if is_checked: # tạo mask cho cơ thể người
+        keypoints = openpose_model(human_img.resize((384,512))) # tìm ra các keypoint
+        model_parse, _ = parsing_model(human_img.resize((384,512))) # phân đoạn ảnh người(chia ra đầu, tay chân,...)
+        mask, mask_gray = get_mask_location('hd', "upper_body", model_parse, keypoints)# tạo mask
+        mask = mask.resize((768,1024))# đưa kích thước của mask về 768x1024
     else:
         mask = pil_to_binary_mask(dict['layers'][0].convert("RGB").resize((768, 1024)))
         # mask = transforms.ToTensor()(mask)
@@ -166,7 +181,7 @@ def start_tryon(dict,garm_img,garment_des,is_checked,is_checked_crop,denoise_ste
     
 
     args = apply_net.create_argument_parser().parse_args(('show', './configs/densepose_rcnn_R_50_FPN_s1x.yaml', './ckpt/densepose/model_final_162be9.pkl', 'dp_segm', '-v', '--opts', 'MODEL.DEVICE', 'cuda'))
-    # verbosity = getattr(args, "verbosity", None)
+    #  verbosity = getattr(args, "verbosity", None)
     pose_img = args.func(args,human_img_arg)    
     pose_img = pose_img[:,:,::-1]    
     pose_img = Image.fromarray(pose_img).resize((768,1024))
@@ -286,10 +301,10 @@ with image_blocks as demo:
                 examples_per_page=8,
                 examples=garm_list_path)
         with gr.Column():
-            # image_out = gr.Image(label="Output", elem_id="output-img", height=400)
+            # image_out = gr.Image(label="Output", elem_id="output-img", height=400)# change here #
             masked_img = gr.Image(label="Masked image output", elem_id="masked-img",show_share_button=False)
         with gr.Column():
-            # image_out = gr.Image(label="Output", elem_id="output-img", height=400)
+            # image_out = gr.Image(label="Output", elem_id="output-img", height=400) # change here #
             image_out = gr.Image(label="Output", elem_id="output-img",show_share_button=False)
 
 
